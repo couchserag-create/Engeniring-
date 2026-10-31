@@ -71,6 +71,26 @@
   </div>
 
   <script>
+    window.__AMPLITUDE_INITIALIZED__ = window.__AMPLITUDE_INITIALIZED__ || false;
+
+    async function initOptionalAmplitude() {
+      const apiKey = window.AMPLITUDE_API_KEY || null;
+      if (!apiKey || window.__AMPLITUDE_INITIALIZED__) return;
+
+      try {
+        const amplitudeModule = await import('https://cdn.jsdelivr.net/npm/@amplitude/unified@latest/+esm');
+        const amplitude = amplitudeModule.default || amplitudeModule;
+        amplitude.initAll(apiKey, {
+          analytics: { autocapture: true },
+          sessionReplay: { sampleRate: 1 }
+        });
+        amplitude.track('teamwork_dashboard_loaded');
+        window.__AMPLITUDE_INITIALIZED__ = true;
+      } catch (error) {
+        console.info('Amplitude not initialized: environment key not provided or SDK load failed.');
+      }
+    }
+
     const statusMap = {
       "not_started": "لم تبدأ",
       "in_progress": "قيد التنفيذ",
@@ -127,6 +147,7 @@
       `;
     }
 
+    initOptionalAmplitude();
     loadProjects();
   </script>
 </body>

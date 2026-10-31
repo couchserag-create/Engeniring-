@@ -15,6 +15,27 @@
 - تقرير HTML نهائي
 - لوحة تحكم ويب للاستعراض
 
+## متغيرات البيئة
+نستخدم `.env` فقط لتخزين القيم الحساسة، وليس داخل الريبو.
+مثال ملف: `.env.example`
+
+```env
+APP_NAME=TeamWork
+AMPLITUDE_API_KEY=replace_with_your_key
+```
+
+> ملاحظة: لا تضع المفتاح الحقيقي داخل الريبو أو في الكود المرسل للـ GitHub public.
+
+### تفعيل Amplitude بشكل آمن (اختياري)
+إذا كنت تريد ربط لوحة المشروع بـ Amplitude في بيئة محلية أو بيئة خاصة، ضع المفتاح في `window.AMPLITUDE_API_KEY` أو في متغيرات البيئة للـ frontend، ثم شغّل التهيئة مرة واحدة فقط.
+
+```js
+if (!window.__AMPLITUDE_INITIALIZED__) {
+  window.__AMPLITUDE_INITIALIZED__ = true;
+  // initAll('YOUR_KEY', { analytics: { autocapture: true }, sessionReplay: { sampleRate: 1 } });
+}
+```
+
 ## التشغيل السريع
 
 ### 1) تثبيت البيئة
