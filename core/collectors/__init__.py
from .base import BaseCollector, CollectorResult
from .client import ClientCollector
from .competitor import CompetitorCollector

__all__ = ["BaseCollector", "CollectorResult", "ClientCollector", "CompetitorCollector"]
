@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class CollectorResult:
+    source: str
+    domain: str
+    collected_at: str
+    records: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "domain": self.domain,
+            "collected_at": self.collected_at,
+            "records": self.records,
+            "metadata": self.metadata,
+        }
+
+
+class BaseCollector:
+    """Base class for all collectors; safe by default and environment-driven."""
+
+    source_name: str = "base"
+
+    def __init__(self, domain: str):
+        self.domain = domain
+
+    def collect(self) -> CollectorResult:
+        raise NotImplementedError
+
+    def _read_env(self, name: str) -> Optional[str]:
+        return os.getenv(name)
+
+    def _safe_json(self, payload: Any, default: Optional[Any] = None) -> Any:
+        try:
+            if isinstance(payload, (dict, list)):
+                return payload
+            if payload is None:
+                return default
+            return json.loads(payload)
+        except (TypeError, ValueError):
+            return default

@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from core.collectors.competitor import CompetitorCollector
+
+
+class CompetitorManager:
+    """Handle competitor intelligence workflows."""
+
+    def __init__(self, domain: str, targets: List[str] | None = None):
+        self.domain = domain
+        self.targets = targets or []
+
+    def collect(self) -> Dict[str, Any]:
+        collector = CompetitorCollector(self.domain, self.targets)
+        result = collector.collect()
+        return {
+            "domain": self.domain,
+            "competitors": result.records,
+            "count": len(result.records),
+            "metadata": result.metadata,
+        }
+
+    def summarize(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        total = len(items)
+        title_count = sum(1 for item in items if item.get("title"))
+        summary_count = sum(1 for item in items if item.get("summary"))
+        return {
+            "total": total,
+            "titled": title_count,
+            "summarized": summary_count,
+        }
+
+__all__ = ["CompetitorManager"]

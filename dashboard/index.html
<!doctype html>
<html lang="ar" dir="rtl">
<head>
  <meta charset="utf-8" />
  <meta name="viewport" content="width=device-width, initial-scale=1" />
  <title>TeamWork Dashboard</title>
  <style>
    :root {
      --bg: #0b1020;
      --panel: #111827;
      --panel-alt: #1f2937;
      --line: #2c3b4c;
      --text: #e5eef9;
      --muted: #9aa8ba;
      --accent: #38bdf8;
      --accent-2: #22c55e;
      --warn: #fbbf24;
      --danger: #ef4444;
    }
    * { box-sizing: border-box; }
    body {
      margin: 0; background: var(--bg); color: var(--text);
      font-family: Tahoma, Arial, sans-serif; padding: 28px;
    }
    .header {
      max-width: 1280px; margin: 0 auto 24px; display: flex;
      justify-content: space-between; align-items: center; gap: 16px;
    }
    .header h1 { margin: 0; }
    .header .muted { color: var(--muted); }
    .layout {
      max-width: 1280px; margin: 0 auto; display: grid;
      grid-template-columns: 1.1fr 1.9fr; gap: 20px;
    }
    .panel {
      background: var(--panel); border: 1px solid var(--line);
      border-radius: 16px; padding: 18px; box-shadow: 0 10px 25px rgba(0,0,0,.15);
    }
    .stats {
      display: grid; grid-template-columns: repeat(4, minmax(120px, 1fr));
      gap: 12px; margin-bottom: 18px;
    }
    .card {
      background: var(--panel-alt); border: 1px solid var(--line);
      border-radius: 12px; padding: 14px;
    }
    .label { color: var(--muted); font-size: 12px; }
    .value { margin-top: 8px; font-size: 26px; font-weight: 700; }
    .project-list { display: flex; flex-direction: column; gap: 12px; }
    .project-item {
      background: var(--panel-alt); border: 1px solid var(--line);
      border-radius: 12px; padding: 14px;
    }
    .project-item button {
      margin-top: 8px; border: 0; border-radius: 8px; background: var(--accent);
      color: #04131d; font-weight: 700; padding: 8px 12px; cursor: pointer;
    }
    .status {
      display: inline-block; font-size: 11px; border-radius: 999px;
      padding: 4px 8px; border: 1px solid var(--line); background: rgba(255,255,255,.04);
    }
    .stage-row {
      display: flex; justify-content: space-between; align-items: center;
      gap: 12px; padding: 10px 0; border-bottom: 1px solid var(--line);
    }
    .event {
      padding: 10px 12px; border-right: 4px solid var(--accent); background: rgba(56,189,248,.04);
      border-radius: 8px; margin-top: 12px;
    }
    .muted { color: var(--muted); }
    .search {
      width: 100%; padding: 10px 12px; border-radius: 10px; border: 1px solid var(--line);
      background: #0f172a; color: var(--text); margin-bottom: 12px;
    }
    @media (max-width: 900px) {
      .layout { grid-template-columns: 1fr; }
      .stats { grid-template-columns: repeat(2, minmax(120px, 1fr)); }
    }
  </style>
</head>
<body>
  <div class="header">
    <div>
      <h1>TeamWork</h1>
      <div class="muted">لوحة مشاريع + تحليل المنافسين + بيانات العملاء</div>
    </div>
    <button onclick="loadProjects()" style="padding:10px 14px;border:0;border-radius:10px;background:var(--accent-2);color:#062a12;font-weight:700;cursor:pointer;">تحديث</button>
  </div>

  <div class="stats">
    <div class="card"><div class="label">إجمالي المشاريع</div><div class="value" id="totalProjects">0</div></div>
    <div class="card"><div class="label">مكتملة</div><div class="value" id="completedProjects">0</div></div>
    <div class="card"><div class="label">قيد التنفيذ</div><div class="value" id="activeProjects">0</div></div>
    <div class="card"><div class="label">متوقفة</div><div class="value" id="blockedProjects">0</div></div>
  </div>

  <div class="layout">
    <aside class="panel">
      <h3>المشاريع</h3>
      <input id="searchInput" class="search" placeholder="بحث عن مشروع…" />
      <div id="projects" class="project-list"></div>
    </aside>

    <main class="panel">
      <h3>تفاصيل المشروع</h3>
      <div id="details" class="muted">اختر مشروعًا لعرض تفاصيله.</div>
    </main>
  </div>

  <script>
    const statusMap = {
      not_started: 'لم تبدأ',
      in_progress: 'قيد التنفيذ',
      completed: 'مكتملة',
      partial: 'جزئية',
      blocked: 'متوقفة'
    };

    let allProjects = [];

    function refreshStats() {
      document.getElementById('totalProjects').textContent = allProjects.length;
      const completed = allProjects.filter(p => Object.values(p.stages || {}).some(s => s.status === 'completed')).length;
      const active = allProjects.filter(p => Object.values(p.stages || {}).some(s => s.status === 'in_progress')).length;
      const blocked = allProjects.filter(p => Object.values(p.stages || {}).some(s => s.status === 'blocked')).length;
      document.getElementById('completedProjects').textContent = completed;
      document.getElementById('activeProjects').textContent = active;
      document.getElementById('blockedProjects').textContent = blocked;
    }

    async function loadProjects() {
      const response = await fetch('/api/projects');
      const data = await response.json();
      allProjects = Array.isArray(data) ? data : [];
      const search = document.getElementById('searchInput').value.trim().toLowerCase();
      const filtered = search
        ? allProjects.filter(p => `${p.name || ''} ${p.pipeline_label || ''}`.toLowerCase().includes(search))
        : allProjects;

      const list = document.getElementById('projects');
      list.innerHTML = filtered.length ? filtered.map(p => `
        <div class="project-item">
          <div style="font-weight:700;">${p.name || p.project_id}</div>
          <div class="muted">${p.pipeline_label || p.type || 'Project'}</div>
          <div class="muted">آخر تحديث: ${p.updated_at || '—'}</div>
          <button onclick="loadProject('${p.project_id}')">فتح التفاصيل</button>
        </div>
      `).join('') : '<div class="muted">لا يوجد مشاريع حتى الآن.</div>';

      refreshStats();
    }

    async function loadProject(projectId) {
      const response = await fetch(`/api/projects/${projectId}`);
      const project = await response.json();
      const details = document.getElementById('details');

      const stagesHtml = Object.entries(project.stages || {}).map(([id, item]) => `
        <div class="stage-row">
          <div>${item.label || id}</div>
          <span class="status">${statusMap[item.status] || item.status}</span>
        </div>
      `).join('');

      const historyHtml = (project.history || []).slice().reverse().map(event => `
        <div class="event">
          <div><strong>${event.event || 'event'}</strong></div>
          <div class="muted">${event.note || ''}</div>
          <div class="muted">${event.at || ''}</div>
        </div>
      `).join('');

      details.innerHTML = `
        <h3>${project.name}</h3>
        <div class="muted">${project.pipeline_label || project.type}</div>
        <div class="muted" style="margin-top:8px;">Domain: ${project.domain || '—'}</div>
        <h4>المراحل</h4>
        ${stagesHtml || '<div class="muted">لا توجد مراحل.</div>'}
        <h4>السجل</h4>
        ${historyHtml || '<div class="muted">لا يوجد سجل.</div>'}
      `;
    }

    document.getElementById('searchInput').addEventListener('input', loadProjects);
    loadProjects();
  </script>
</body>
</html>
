@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Dict, List
+
+from core.analytics import SafeAnalytics
+
+
+class DashboardStore:
+    """Lightweight JSON-backed storage for dashboard runtime state."""
+
+    def __init__(self, path: str | None = None):
+        self.path = path or os.getenv("DASHBOARD_STORE", "data/dashboard_store.json")
+        self._ensure_parent()
+
+    def _ensure_parent(self) -> None:
+        directory = os.path.dirname(self.path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+    def read(self) -> Dict[str, Any]:
+        if not os.path.exists(self.path):
+            return {"events": [], "metrics": {}}
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except json.JSONDecodeError:
+            return {"events": [], "metrics": {}}
+
+    def write(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with open(self.path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        return payload
+
+    def push_event(self, event_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        state = self.read()
+        entry = {
+            "name": event_name,
+            "context": context or {},
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        }
+        state.setdefault("events", []).append(entry)
+        self.write(state)
+        analytics = SafeAnalytics()
+        analytics.track(event_name, context or {})
+        return entry
+
+
+__all__ = ["DashboardStore"]

@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+
+from core.collectors.base import CollectorResult
+
+
+class ClientRegistry:
+    """Simple registry for client records and campaign metadata."""
+
+    def __init__(self, root: str | None = None):
+        self.root = Path(root or os.getenv("CLIENT_DATA_DIR", "data/clients"))
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def save(self, client_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        path = self.root / f"{client_id}.json"
+        data = {"client_id": client_id, "updated_at": datetime.now(timezone.utc).isoformat()}
+        data.update(payload)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return data
+
+    def list(self) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for p in sorted(self.root.glob("*.json")):
+            try:
+                rows.append(json.loads(p.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                continue
+        return rows
+
+    def get(self, client_id: str) -> Dict[str, Any] | None:
+        path = self.root / f"{client_id}.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+
+__all__ = ["ClientRegistry", "CollectorResult"]
