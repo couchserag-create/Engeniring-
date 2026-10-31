@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamWork Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Tahoma, Arial, sans-serif;
+      padding: 32px;
+    }
+    .wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.2fr 1.8fr;
+      gap: 20px;
+    }
+    .panel {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 14px;
+      padding: 18px;
+    }
+    .top-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .stat-card .label { color: #9ca3af; font-size: 12px; }
+    .stat-card .value { font-size: 28px; font-weight: bold; margin-top: 8px; }
+    h2, h3 { margin-top: 0; }
+    .project-item {
+      padding: 12px;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      margin-top: 12px;
+      background: #1f2937;
+    }
+    .project-item button {
+      margin-top: 8px;
+      background: #38bdf8;
+      color: #082f49;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .stage-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #273446;
+    }
+    .status {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #374151;
+      color: #f9fafb;
+    }
+    .event {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #0b1220;
+      border-right: 4px solid #38bdf8;
+      border-radius: 8px;
+    }
+    .muted { color: #9ca3af; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #374151;
+      background: #0f172a;
+      color: white;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="panel">
+      <h2>المشاريع</h2>
+      <input id="searchInput" placeholder="بحث في المشاريع…" />
+      <div id="projects"></div>
+    </div>
+
+    <div class="panel">
+      <h2>تفاصيل المشروع</h2>
+      <div id="details" class="muted">اختر مشروعًا…</div>
+    </div>
+  </div>
+
+  <div class="wrapper" style="margin-top:24px;">
+    <div class="stat-card">
+      <div class="label">إجمالي المشاريع</div>
+      <div class="value" id="totalProjects">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">مكتملة</div>
+      <div class="value" id="completedProjects">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">قيد التنفيذ</div>
+      <div class="value" id="activeProjects">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">متوقفة</div>
+      <div class="value" id="blockedProjects">0</div>
+    </div>
+  </div>
+
+  <script>
+    window.__AMPLITUDE_INITIALIZED__ = window.__AMPLITUDE_INITIALIZED__ || false;
+
+    async function initOptionalAmplitude() {
+      const apiKey = window.AMPLITUDE_API_KEY || null;
+      if (!apiKey || window.__AMPLITUDE_INITIALIZED__) return;
+      try {
+        const amplitudeModule = await import('https://cdn.jsdelivr.net/npm/@amplitude/unified@latest/+esm');
+        const amplitude = amplitudeModule.default || amplitudeModule;
+        amplitude.initAll(apiKey, {
+          analytics: { autocapture: true },
+          sessionReplay: { sampleRate: 1 }
+        });
+        amplitude.track('teamwork_dashboard_loaded');
+        window.__AMPLITUDE_INITIALIZED__ = true;
+      } catch (error) {
+        console.info('Amplitude not initialized: environment key not provided or SDK load failed.');
+      }
+    }
+
+    const statusMap = {
+      "not_started": "لم تبدأ",
+      "in_progress": "قيد التنفيذ",
+      "completed": "مكتملة",
+      "partial": "جزئية",
+      "blocked": "متوقفة"
+    };
+
+    let allProjects = [];
+
+    function renderStats() {
+      document.getElementById('totalProjects').textContent = allProjects.length;
+      const completed = allProjects.filter(p => Object.values(p.stages || {}).some(s => s.status === 'completed')).length;
+      const active = allProjects.filter(p => Object.values(p.stages || {}).some(s => s.status === 'in_progress')).length;
+      const blocked = allProjects.filter(p => Object.values(p.stages || {}).some(s => s.status === 'blocked')).length;
+      document.getElementById('completedProjects').textContent = completed;
+      document.getElementById('activeProjects').textContent = active;
+      document.getElementById('blockedProjects').textContent = blocked;
+    }
+
+    async function loadProjects() {
+      const res = await fetch('/api/projects');
+      allProjects = await res.json();
+      const projectsEl = document.getElementById('projects');
+      if (!allProjects.length) {
+        projectsEl.innerHTML = "<p class='muted'>لا يوجد مشاريع حتى الآن.</p>";
+        renderStats();
+        return;
+      }
+
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      const filtered = q ? allProjects.filter(p => `${p.name} ${p.pipeline_label || ''}`.toLowerCase().includes(q)) : allProjects;
+
+      projectsEl.innerHTML = filtered.map(p => `
+        <div class="project-item">
+          <h3>${p.name}</h3>
+          <div class="muted">${p.pipeline_label || p.type}</div>
+          <div class="muted">آخر تحديث: ${p.updated_at || '—'}</div>
+          <button onclick="loadProject('${p.project_id}')">السجل والمراحل</button>
+        </div>
+      `).join('');
+
+      renderStats();
+    }
+
+    async function loadProject(projectId) {
+      const res = await fetch(`/api/projects/${projectId}`);
+      const p = await res.json();
+      const details = document.getElementById('details');
+
+      const stages = Object.entries(p.stages || {}).map(([id, s]) => `
+        <div class="stage-row">
+          <div>${s.label}</div>
+          <div class="status">${statusMap[s.status] || s.status}</div>
+        </div>
+      `).join('');
+
+      const history = (p.history || []).slice().reverse().map(e => `
+        <div class="event">
+          <div><strong>${e.event}</strong></div>
+          <div class="muted">${e.note || ''}</div>
+          <div class="muted">${e.at}</div>
+        </div>
+      `).join('');
+
+      details.innerHTML = `
+        <h3>${p.name}</h3>
+        <div class="muted">${p.pipeline_label}</div>
+        <h4>المراحل</h4>
+        ${stages}
+        <h4>السجل</h4>
+        ${history || "<div class='muted'>لا يوجد سجل.</div>"}
+      `;
+    }
+
+    document.getElementById('searchInput').addEventListener('input', loadProjects);
+    initOptionalAmplitude();
+    loadProjects();
+  </script>
+</body>
+</html>
