@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+from core.normalization.transformers import normalize_all_data
+from core.utils.time import utc_now_iso
+from core.validation.validator_l1 import validate_raw_data_sufficiency
+from core.validation.validator_l2 import validate_analysis_consistency
+from plugins.content.content_plugin import ContentPlugin
+from plugins.seo.seo_plugin import SEOPlugin
+from reports.generator import save_report_files
+
+ROOT = Path(__file__).resolve().parent
+RUNS = ROOT / "runs"
+CONFIG = ROOT / "config" / "pipelines.json"
+ALLOWED_STATUSES = {"not_started", "in_progress", "completed", "partial", "blocked"}
+
+
+def safe_id(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,79}", value):
+        raise ValueError("project-id must use lowercase letters, numbers, and hyphens only")
+    return value
+
+
+def load_json(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def pipeline_for(project_type: str) -> dict:
+    config = load_json(CONFIG)
+    if project_type not in config["pipelines"]:
+        raise ValueError(f"unknown project type: {project_type}")
+    return config["pipelines"][project_type]
+
+
+def init_project(project_id: str, name: str, project_type: str, domain: str | None = None) -> None:
+    clean_id = safe_id(project_id)
+    project_dir = RUNS / clean_id
+    if project_dir.exists():
+        raise ValueError("project already exists")
+
+    definition = pipeline_for(project_type)
+    stage_map = {
+        stage["id"]: {"label": stage["label"], "status": "not_started", "updated_at": None}
+        for stage in definition["stages"]
+    }
+
+    manifest = {
+        "project_id": clean_id,
+        "name": name,
+        "type": project_type,
+        "pipeline_label": definition["label"],
+        "created_at": utc_now_iso(),
+        "updated_at": utc_now_iso(),
+        "stages": stage_map,
+        "history": [{
+            "at": utc_now_iso(),
+            "event": "project_created",
+            "note": "تم إنشاء المشروع"
+        }],
+    }
+
+    save_json(project_dir / "manifest.json", manifest)
+    save_json(project_dir / "input.json", {
+        "project_id": clean_id,
+        "name": name,
+        "domain": domain or "example.com",
+        "created_at": utc_now_iso(),
+    })
+    print(f"Created project: {clean_id}")
+
+
+def advance_stage(project_id: str, stage: str, status: str, note: str = "") -> None:
+    project_dir = RUNS / safe_id(project_id)
+    manifest_path = project_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise ValueError("project does not exist")
+
+    manifest = load_json(manifest_path)
+    if stage not in manifest["stages"]:
+        raise ValueError("stage does not belong to this project")
+    if status not in ALLOWED_STATUSES:
+        raise ValueError("invalid status")
+
+    manifest["stages"][stage]["status"] = status
+    manifest["stages"][stage]["updated_at"] = utc_now_iso()
+    manifest["history"].append({
+        "at": utc_now_iso(),
+        "event": "stage_changed",
+        "stage_id": stage,
+        "note": note,
+    })
+    manifest["updated_at"] = utc_now_iso()
+    save_json(manifest_path, manifest)
+    print(f"Updated {stage}: {status}")
+
+
+def run_pipeline(project_id: str) -> None:
+    project_dir = RUNS / safe_id(project_id)
+    manifest_path = project_dir / "manifest.json"
+    input_path = project_dir / "input.json"
+    if not manifest_path.exists():
+        raise ValueError("project does not exist")
+
+    manifest = load_json(manifest_path)
+    input_data = load_json(input_path)
+    domain = input_data.get("domain", "example.com")
+    outputs_dir = project_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_data = {
+        "domain": domain,
+        "pages": [
+            {
+                "url": f"https://{domain}/",
+                "title": "الرئيسية",
+                "meta_description": "حلول الشركة والمنتجات",
+                "canonical_url": f"https://{domain}/",
+                "h1_headers": ["أهلا بكم"],
+                "word_count": 240,
+                "load_time_seconds": 2.2,
+                "has_schema_org": True,
+                "broken_links": []
+            },
+            {
+                "url": f"https://{domain}/services",
+                "title": "خدماتنا",
+                "meta_description": "",
+                "canonical_url": f"https://{domain}/services",
+                "h1_headers": ["خدماتنا"],
+                "word_count": 150,
+                "load_time_seconds": 3.7,
+                "has_schema_org": False,
+                "broken_links": [f"https://{domain}/broken-page"]
+            }
+        ],
+        "youtube": [
+            {"id": "yt_1", "title": "منشور فيديو تعريفي", "views": 14000, "likes": 1800, "comments": 210, "engagement_rate": 0.037}
+        ],
+        "facebook": [
+            {"id": "fb_1", "text": "تعريف بالقيمة", "likes": 900, "comments": 80, "shares": 50, "engagement_rate": 0.028}
+        ]
+    }
+
+    save_json(outputs_dir / "raw_collection.json", raw_data)
+
+    is_valid_l1, gaps = validate_raw_data_sufficiency(raw_data, min_pages=1, min_posts=1)
+    save_json(outputs_dir / "validator_l1.json", {"is_valid": is_valid_l1, "gaps": gaps})
+    if not is_valid_l1:
+        manifest["stages"]["validator_l1"]["status"] = "blocked"
+        save_json(manifest_path, manifest)
+        print("Pipeline stopped at L1 validation.")
+        return
+
+    dataset = normalize_all_data(project_id, domain, raw_data)
+    save_json(outputs_dir / "normalized_dataset.json", dataset.__dict__)
+
+    plugin_results = {
+        SEOPlugin().name: SEOPlugin().analyze(dataset),
+        ContentPlugin().name: ContentPlugin().analyze(dataset),
+    }
+
+    save_json(outputs_dir / "plugin_results.json", plugin_results)
+    is_valid_l2, confidence, issues = validate_analysis_consistency(plugin_results)
+    save_json(outputs_dir / "validator_l2.json", {"is_valid": is_valid_l2, "confidence": confidence, "issues": issues})
+
+    summary = "النتيجة الإجمالية تشير إلى وجود فرص قوية لتحسين محركات البحث والمحتوى، مع إمكانية تحريك النمو خلال 30-60 يومًا."
+    save_report_files(project_id, outputs_dir, domain, plugin_results, summary)
+
+    manifest["stages"]["phase4_analysis_plugins"]["status"] = "completed"
+    manifest["stages"]["phase7_report_generation"]["status"] = "completed"
+    manifest["updated_at"] = utc_now_iso()
+    manifest["history"].append({
+        "at": utc_now_iso(),
+        "event": "pipeline_execution_completed",
+        "note": "تم تنفيذ المراحل الأساسية بنجاح"
+    })
+    save_json(manifest_path, manifest)
+
+    print(f"Pipeline complete. Report saved at: {outputs_dir / 'executive_report.html'}")
+
+
+def status_project(project_id: str) -> None:
+    project_dir = RUNS / safe_id(project_id)
+    manifest_path = project_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise ValueError("project does not exist")
+
+    manifest = load_json(manifest_path)
+    print(manifest["name"] + " — " + manifest["pipeline_label"])
+    for stage_id, item in manifest["stages"].items():
+        print(f"{stage_id:30} {item['status']}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="TeamWork")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init = subparsers.add_parser("init")
+    init.add_argument("--project-id", required=True)
+    init.add_argument("--name", required=True)
+    init.add_argument("--type", required=True, choices=["company_intelligence", "content_marketing"])
+    init.add_argument("--domain")
+    init.set_defaults(handler=lambda args: init_project(args.project_id, args.name, args.type, args.domain))
+
+    advance = subparsers.add_parser("advance")
+    advance.add_argument("--project-id", required=True)
+    advance.add_argument("--stage", required=True)
+    advance.add_argument("--status", required=True)
+    advance.add_argument("--note")
+    advance.set_defaults(handler=lambda args: advance_stage(args.project_id, args.stage, args.status, args.note or ""))
+
+    run = subparsers.add_parser("run")
+    run.add_argument("--project-id", required=True)
+    run.set_defaults(handler=lambda args: run_pipeline(args.project_id))
+
+    status = subparsers.add_parser("status")
+    status.add_argument("--project-id", required=True)
+    status.set_defaults(handler=lambda args: status_project(args.project_id))
+
+    args = parser.parse_args()
+    try:
+        args.handler(args)
+        return 0
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

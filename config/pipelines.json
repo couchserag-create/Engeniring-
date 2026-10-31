@@ -1,0 +1,32 @@
+{
+  "pipelines": {
+    "company_intelligence": {
+      "label": "ذكاء الشركة والاستراتيجية",
+      "stages": [
+        {"id": "phase0_discovery", "label": "Discovery"},
+        {"id": "phase1_raw_collection", "label": "Raw Collection"},
+        {"id": "validator_l1", "label": "Validator L1"},
+        {"id": "phase2_normalization", "label": "Normalization"},
+        {"id": "phase3_processing", "label": "Processing"},
+        {"id": "phase4_analysis_plugins", "label": "Analysis Plugins"},
+        {"id": "phase5_decision_engine", "label": "Decision Engine"},
+        {"id": "phase6_prompt_builder", "label": "Prompt Builder"},
+        {"id": "validator_l2", "label": "Validator L2"},
+        {"id": "phase7_report_generation", "label": "Report Generation"}
+      ]
+    },
+    "content_marketing": {
+      "label": "التسويق بالمحتوى",
+      "stages": [
+        {"id": "research_evidence", "label": "Research Evidence"},
+        {"id": "angle", "label": "Angle"},
+        {"id": "script", "label": "Script"},
+        {"id": "verify", "label": "Verification"},
+        {"id": "visual_plan", "label": "Visual Plan"},
+        {"id": "edit", "label": "Edit"},
+        {"id": "publish", "label": "Publish"},
+        {"id": "report", "label": "Final Report"}
+      ]
+    }
+  }
+}

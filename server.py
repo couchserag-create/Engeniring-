@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import re
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parent
+RUNS = ROOT / "runs"
+
+
+def load_json(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(ROOT / "dashboard"), **kwargs)
+
+    def send_json(self, data: object, code: int = 200) -> None:
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        if path == "/api/projects":
+            items = []
+            for p in sorted(RUNS.glob("*/manifest.json"), reverse=True):
+                manifest = load_json(p)
+                items.append({
+                    "project_id": manifest["project_id"],
+                    "name": manifest["name"],
+                    "type": manifest["type"],
+                    "pipeline_label": manifest["pipeline_label"],
+                    "updated_at": manifest["updated_at"],
+                })
+            self.send_json(items)
+            return
+
+        match = re.fullmatch(r"/api/projects/([a-z0-9-]+)", path)
+        if match:
+            project_id = match.group(1)
+            manifest_path = RUNS / project_id / "manifest.json"
+            if manifest_path.exists():
+                self.send_json(load_json(manifest_path))
+                return
+            self.send_json({"error": "project not found"}, 404)
+            return
+
+        return super().do_GET()
+
+
+if __name__ == "__main__":
+    print("TeamWork dashboard: http://localhost:8787")
+    ThreadingHTTPServer(("127.0.0.1", 8787), Handler).serve_forever()
